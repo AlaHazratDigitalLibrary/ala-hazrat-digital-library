@@ -1,6 +1,8 @@
 import streamlit as st
 from pypdf import PdfReader
 from google import genai
+from pathlib import Path
+
 
 # =========================================================
 # Gemini API Key
@@ -12,7 +14,7 @@ GEMINI_API_KEY = PART1 + PART2
 
 
 # =========================================================
-# পেজ কনফিগারেশন
+# Page Configuration
 # =========================================================
 st.set_page_config(
     page_title="আলা হযরত ডিজিটাল লাইব্রেরি",
@@ -22,148 +24,172 @@ st.set_page_config(
 
 
 # =========================================================
-# CSS ডিজাইন
+# CSS
 # =========================================================
 st.markdown("""
-    <style>
+<style>
 
-    .main-header {
-        background-color: #075e54;
-        padding: 20px;
-        border-radius: 10px;
-        color: white;
-        text-align: center;
-        margin-bottom: 20px;
-    }
+.main-header {
+    background-color: #075e54;
+    padding: 20px;
+    border-radius: 10px;
+    color: white;
+    text-align: center;
+    margin-bottom: 20px;
+}
 
-    .main-header h1 {
-        margin: 0;
-        color: #ffffff;
-        font-size: 28px;
-    }
+.main-header h1 {
+    margin: 0;
+    color: white;
+    font-size: 28px;
+}
 
-    .main-header p {
-        margin-top: 5px;
-        color: #e0f2f1;
-    }
+.main-header p {
+    margin-top: 8px;
+    color: #e0f2f1;
+}
 
-    </style>
+.book-box {
+    background-color: #f1f8f6;
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+}
+
+</style>
 """, unsafe_allow_html=True)
 
 
 # =========================================================
-# হেডার
+# Header
 # =========================================================
 st.markdown("""
-    <div class="main-header">
-        <h1>📚 আলা হযরত ডিজিটাল লাইব্রেরি ও এআই অ্যাসিস্ট্যান্ট</h1>
-        <p>
-            ইমাম আহলে সুন্নাত শাহ আহমদ রযা খান রহ.-এর
-            কিতাবভিত্তিক গবেষণা ও ফতোয়া অনুসন্ধান
-        </p>
-    </div>
+<div class="main-header">
+    <h1>📚 আলা হযরত ডিজিটাল লাইব্রেরি ও এআই অ্যাসিস্ট্যান্ট</h1>
+    <p>
+        ইমাম আহলে সুন্নাত শাহ আহমদ রযা খান রহ.-এর
+        কিতাবভিত্তিক গবেষণা ও ফতোয়া অনুসন্ধান
+    </p>
+</div>
 """, unsafe_allow_html=True)
 
 
 # =========================================================
-# সাইডবার
+# Books Folder
 # =========================================================
-st.sidebar.title("📖 কিতাব ব্যবস্থাপনা")
-
-uploaded_files = st.sidebar.file_uploader(
-    "📥 কিতাব আপলোড করুন (PDF):",
-    type="pdf",
-    accept_multiple_files=True
-)
+BOOKS_FOLDER = Path("books")
 
 
 # =========================================================
 # PDF থেকে Text Extract
 # =========================================================
 @st.cache_data(show_spinner=False)
-def extract_pdf_text(files):
+def load_books():
 
-    extracted_text = ""
+    all_text = ""
     book_names = []
+    total_pages = 0
 
-    for file in files:
+    # books folder না থাকলে
+    if not BOOKS_FOLDER.exists():
+        BOOKS_FOLDER.mkdir(parents=True, exist_ok=True)
+        return "", [], 0
 
-        book_names.append(file.name)
+    # সব PDF খুঁজে বের করা
+    pdf_files = sorted(BOOKS_FOLDER.glob("*.pdf"))
 
-        reader = PdfReader(file)
+    for pdf_file in pdf_files:
 
-        # বর্তমানে সর্বোচ্চ 150 পৃষ্ঠা
-        max_pages = min(len(reader.pages), 150)
+        try:
 
-        for i in range(max_pages):
+            reader = PdfReader(str(pdf_file))
 
-            page = reader.pages[i]
+            book_names.append(pdf_file.name)
 
-            try:
-                text = page.extract_text()
-            except Exception:
-                text = None
+            # সম্পূর্ণ PDF পড়বে
+            for page_number, page in enumerate(reader.pages, start=1):
 
-            if text:
+                try:
+                    text = page.extract_text()
+                except Exception:
+                    text = None
 
-                extracted_text += (
-                    f"\n\n"
-                    f"--- [রেফারেন্স -> "
-                    f"কিতাব: {file.name}, "
-                    f"পৃষ্ঠা: {i + 1}] ---\n"
-                    f"{text}"
-                )
+                if text and text.strip():
 
-    return extracted_text, book_names
+                    all_text += (
+                        "\n\n"
+                        "==================================================\n"
+                        f"কিতাব: {pdf_file.name}\n"
+                        f"PDF পৃষ্ঠা: {page_number}\n"
+                        "==================================================\n"
+                        f"{text}\n"
+                    )
 
+                    total_pages += 1
 
-# =========================================================
-# PDF প্রসেস
-# =========================================================
-pdf_texts = ""
-book_names = []
+        except Exception as e:
 
-if uploaded_files:
+            all_text += (
+                f"\nকিতাব পড়তে সমস্যা হয়েছে: "
+                f"{pdf_file.name}\n"
+                f"Error: {e}\n"
+            )
 
-    with st.sidebar.status(
-        "কিতাব প্রসেস হচ্ছে...",
-        expanded=True
-    ) as status:
-
-        pdf_texts, book_names = extract_pdf_text(uploaded_files)
-
-        status.update(
-            label="কিতাব লোড সম্পন্ন!",
-            state="complete",
-            expanded=False
-        )
+    return all_text, book_names, total_pages
 
 
 # =========================================================
-# কিতাবের তালিকা
+# কিতাব Load
 # =========================================================
+with st.spinner("📚 লাইব্রেরির কিতাব প্রস্তুত করা হচ্ছে..."):
+
+    pdf_texts, book_names, total_pages = load_books()
+
+
+# =========================================================
+# Sidebar
+# =========================================================
+st.sidebar.title("📖 ডিজিটাল লাইব্রেরি")
+
 if book_names:
 
-    st.sidebar.markdown("### 📚 যুক্তকৃত কিতাবের তালিকা:")
+    st.sidebar.success(
+        f"📚 মোট {len(book_names)}টি কিতাব"
+    )
 
-    for b_name in book_names:
+    st.sidebar.markdown("### 📚 যুক্তকৃত কিতাব")
 
-        st.sidebar.write(
-            f"• {b_name}"
-        )
+    for book in book_names:
+        st.sidebar.write(f"📕 {book}")
+
+    st.sidebar.markdown("---")
+
+    st.sidebar.write(
+        f"📄 Text পাওয়া পৃষ্ঠা: {total_pages}"
+    )
+
+else:
+
+    st.sidebar.warning(
+        "⚠️ books folder-এ কোনো PDF পাওয়া যায়নি।"
+    )
 
 
 # =========================================================
-# প্রশ্ন অংশ
+# Question Section
 # =========================================================
 st.markdown("### 💬 কিতাব থেকে প্রশ্ন করুন")
+
+st.info(
+    "📚 এখানে প্রশ্ন করলে লাইব্রেরিতে সংরক্ষিত কিতাবসমূহ "
+    "থেকে তথ্য অনুসন্ধান করে উত্তর দেওয়ার চেষ্টা করা হবে।"
+)
 
 
 # =========================================================
 # Chat History
 # =========================================================
 if "messages" not in st.session_state:
-
     st.session_state.messages = []
 
 
@@ -171,27 +197,26 @@ for message in st.session_state.messages:
 
     with st.chat_message(message["role"]):
 
-        st.markdown(
-            message["content"]
-        )
+        st.markdown(message["content"])
 
 
 # =========================================================
 # User Question
 # =========================================================
-if prompt := st.chat_input("প্রশ্ন লিখুন..."):
+if prompt := st.chat_input("আপনার প্রশ্ন লিখুন..."):
 
-    # PDF না থাকলে
+    # কিতাব না থাকলে
     if not pdf_texts:
 
-        st.warning(
-            "⚠️ দয়া করে সাইডবার থেকে অন্তত একটি PDF কিতাব আপলোড করুন।"
+        st.error(
+            "⚠️ বর্তমানে লাইব্রেরিতে কোনো কিতাবের "
+            "Text পাওয়া যাচ্ছে না।"
         )
 
         st.stop()
 
 
-    # User message সংরক্ষণ
+    # User message save
     st.session_state.messages.append(
         {
             "role": "user",
@@ -200,18 +225,18 @@ if prompt := st.chat_input("প্রশ্ন লিখুন..."):
     )
 
 
-    # User message দেখানো
+    # User message show
     with st.chat_message("user"):
 
         st.markdown(prompt)
 
 
     # =====================================================
-    # AI Response
+    # AI Answer
     # =====================================================
     with st.chat_message("assistant"):
 
-        with st.spinner("উত্তর প্রস্তুত করা হচ্ছে..."):
+        with st.spinner("🔎 কিতাবে অনুসন্ধান করে উত্তর প্রস্তুত করা হচ্ছে..."):
 
             try:
 
@@ -221,55 +246,61 @@ if prompt := st.chat_input("প্রশ্ন লিখুন..."):
                 )
 
 
-                # বর্তমানে সর্বোচ্চ 150000 character
+                # =================================================
+                # Context
+                # =================================================
+                # আপাতত 150000 character ব্যবহার করা হচ্ছে
                 context = pdf_texts[:150000]
 
 
                 # =================================================
-                # System Instruction
+                # Instruction
                 # =================================================
                 system_instruction = f"""
-আপনি আলা হযরত ইমাম আহমদ রযা খান রহ.-এর
-কিতাবসমূহের একজন প্রাজ্ঞ ও বিশ্বস্ত
-কিতাবভিত্তিক গবেষণা সহকারী।
+আপনি "আলা হযরত ডিজিটাল লাইব্রেরি"-এর
+একজন বিশ্বস্ত কিতাবভিত্তিক গবেষণা সহকারী।
 
-আপনার জন্য নিচের PDF কিতাবের Text প্রদান করা হয়েছে।
+আপনার কাছে যে কনটেক্সট দেওয়া হয়েছে,
+তা GitHub-এর books folder-এ সংরক্ষিত PDF কিতাব
+থেকে সংগ্রহ করা হয়েছে।
 
-আপনাকে অবশ্যই নিচের নিয়মগুলো অনুসরণ করতে হবে:
+আপনাকে অবশ্যই নিচের নিয়মগুলো কঠোরভাবে অনুসরণ করতে হবে:
 
-১। কেবলমাত্র প্রদান করা কিতাবের কনটেক্সট অনুসরণ করে
-ব্যবহারকারীর প্রশ্নের উত্তর দিন।
+১। কেবল প্রদত্ত কিতাবের কনটেক্সটের ভিত্তিতে
+উত্তর প্রদান করবেন।
 
-২। কনটেক্সটে তথ্য না থাকলে নিজের জ্ঞান থেকে
-কোনো তথ্য যোগ করবেন না।
+২। কনটেক্সটে উত্তর না থাকলে নিজের সাধারণ জ্ঞান
+ব্যবহার করে উত্তর তৈরি করবেন না।
 
 ৩। কোনো আরবি ইবারত, হাদিস, ফতোয়া বা উদ্ধৃতি
 নিজে থেকে বানিয়ে লিখবেন না।
 
-৪। কোনো কিতাবের পৃষ্ঠা নম্বর অনুমান করবেন না।
+৪। কোনো রেফারেন্স বা পৃষ্ঠা নম্বর অনুমান করবেন না।
 
-৫। উত্তরের শেষে অবশ্যই কিতাবের নাম এবং
-PDF-এর পৃষ্ঠা নম্বর উল্লেখ করার চেষ্টা করবেন।
+৫। কনটেক্সটে যে কিতাবের নাম এবং PDF পৃষ্ঠা
+দেওয়া আছে, সেটিই রেফারেন্স হিসেবে ব্যবহার করবেন।
 
-৬। যদি প্রশ্নের উত্তর প্রদত্ত কিতাবে পাওয়া না যায়,
-তাহলে হুবহু বলুন:
+৬। ব্যবহারকারী যদি আরবি ইবারত চান,
+তাহলে কনটেক্সটে থাকা আরবি ইবারতই প্রদান করবেন।
 
-"দুঃখিত, আপনার আপলোডকৃত কিতাবে
+৭। আরবি ইবারতের সঙ্গে বাংলা অনুবাদ প্রয়োজন হলে
+তার বাংলা অনুবাদ প্রদান করবেন।
+
+৮। একই বিষয়ে একাধিক কিতাবে তথ্য থাকলে
+প্রাসঙ্গিক একাধিক রেফারেন্স উল্লেখ করবেন।
+
+৯। উত্তর পরিষ্কার, সংক্ষিপ্ত এবং গবেষণামূলক হবে।
+
+১০। উত্তর শেষে "রেফারেন্স" শিরোনামে
+কিতাবের নাম ও PDF পৃষ্ঠা উল্লেখ করবেন।
+
+১১। যদি প্রদত্ত কনটেক্সটে প্রশ্নের উত্তর পাওয়া না যায়,
+তাহলে বলবেন:
+
+"দুঃখিত, লাইব্রেরিতে সংরক্ষিত কিতাবসমূহে
 এই বিষয়ে কোনো তথ্য পাওয়া যায়নি।"
 
-৭। যদি কিতাবে একাধিক জায়গায় তথ্য থাকে,
-তাহলে যতগুলো প্রাসঙ্গিক রেফারেন্স পাওয়া যায়
-সেগুলো উল্লেখ করুন।
-
-৮। ব্যবহারকারী যদি আরবি ইবারত চান,
-তাহলে কনটেক্সটে থাকা ইবারতই ব্যবহার করুন।
-নিজে থেকে আরবি বাক্য তৈরি করবেন না।
-
-৯। উত্তর পরিষ্কার, গবেষণামূলক এবং
-বাংলা ভাষায় প্রদান করুন।
-
-১০। কিতাবের নাম, পৃষ্ঠা এবং উদ্ধৃতির ক্ষেত্রে
-অনুমান করা সম্পূর্ণ নিষিদ্ধ।
+১২। কোনো তথ্য অনুমান করা সম্পূর্ণ নিষিদ্ধ।
 
 --------------------------------------------------
 
@@ -286,8 +317,6 @@ PDF-এর পৃষ্ঠা নম্বর উল্লেখ করার �
                 # =================================================
                 response = client.models.generate_content(
 
-                    # পুরোনো gemini-2.5-flash এর পরিবর্তে
-                    # নতুন মডেল
                     model="gemini-3.6-flash",
 
                     contents=(
@@ -309,15 +338,16 @@ PDF-এর পৃষ্ঠা নম্বর উল্লেখ করার �
 
                 answer = (
                     "⚠️ উত্তর তৈরি করতে সমস্যা হয়েছে।\n\n"
-                    f"ত্রুটির বিবরণ:\n{e}"
+                    "ত্রুটির বিবরণ:\n"
+                    f"{e}"
                 )
 
 
-            # Answer দেখানো
+            # Show answer
             st.markdown(answer)
 
 
-            # Assistant message সংরক্ষণ
+            # Save answer
             st.session_state.messages.append(
                 {
                     "role": "assistant",
