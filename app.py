@@ -105,11 +105,18 @@ if prompt := st.chat_input("প্রশ্ন লিখুন..."):
                 {context}
                 """
                 
-                # আপডেট করা Gemini মডেল ব্যবহার করা হয়েছে
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=f"{system_instruction}\n\nপ্রশ্ন: {prompt}"
-                )
+                # সচল ও স্থায়ী মডেলে পরিবর্তন করা হয়েছে
+                try:
+                    response = client.models.generate_content(
+                        model='gemini-1.5-flash',
+                        contents=f"{system_instruction}\n\nপ্রশ্ন: {prompt}"
+                    )
+                except Exception:
+                    response = client.models.generate_content(
+                        model='gemini-2.0-flash',
+                        contents=f"{system_instruction}\n\nপ্রশ্ন: {prompt}"
+                    )
+                    
                 answer = response.text
             except Exception as e:
                 answer = f"ত্রুটি ঘটেছে: {e}"
