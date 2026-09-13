@@ -105,6 +105,7 @@ if prompt := st.chat_input("প্রশ্ন লিখুন..."):
                 {context}
                 """
                 
+                # আপডেট করা Gemini মডেল ব্যবহার করা হয়েছে
                 response = client.models.generate_content(
                     model='gemini-2.5-flash',
                     contents=f"{system_instruction}\n\nপ্রশ্ন: {prompt}"
