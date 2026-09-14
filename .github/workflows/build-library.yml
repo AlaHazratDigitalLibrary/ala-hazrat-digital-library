@@ -1,6 +1,8 @@
 name: Build Islamic Library
 
 on:
+  workflow_dispatch:
+
   push:
     paths:
       - "books/**"
