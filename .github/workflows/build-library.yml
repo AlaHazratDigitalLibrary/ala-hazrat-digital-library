@@ -11,13 +11,10 @@ permissions:
   contents: write
 
 jobs:
-
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -27,20 +24,15 @@ jobs:
           python-version: "3.12"
 
       - name: Install PDF library
-        run: |
-          pip install pypdf
+        run: pip install pypdf
 
       - name: Build PDF index
-        run: |
-          python build_index.py
+        run: python build_index.py
 
       - name: Save library database
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git add data/library.db
-
           git diff --cached --quiet || git commit -m "Update Islamic library"
-
           git push
