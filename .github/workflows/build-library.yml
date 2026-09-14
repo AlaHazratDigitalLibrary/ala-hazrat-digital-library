@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -23,16 +23,16 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install PDF library
+      - name: Install pypdf
         run: pip install pypdf
 
-      - name: Build PDF index
+      - name: Build Library
         run: python build_index.py
 
-      - name: Save library database
+      - name: Save Database
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/library.db
-          git diff --cached --quiet || git commit -m "Update Islamic library"
+          git diff --cached --quiet || git commit -m "Update library"
           git push
