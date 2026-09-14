@@ -4,141 +4,148 @@ import re
 import unicodedata
 from pathlib import Path
 from google import genai
-from google.genai import types
-
 
 # =========================================================
-# SETTINGS
+# PAGE CONFIG
 # =========================================================
-
-DB_FILE = Path("data/library.db")
-
 
 st.set_page_config(
-    page_title="আলা হযরত AI",
+    page_title="Ala Hazrat Digital Library",
     page_icon="📚",
-    layout="centered",
-    initial_sidebar_state="collapsed"
+    layout="centered"
 )
 
+# =========================================================
+# CSS
+# =========================================================
+
+st.markdown("""
+<style>
+.main-title {
+    text-align: center;
+    font-size: 30px;
+    font-weight: 700;
+    margin-top: 20px;
+}
+.subtitle {
+    text-align: center;
+    color: #777;
+    margin-bottom: 30px;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # =========================================================
-# GEMINI API KEY
+# GEMINI
 # =========================================================
 
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 except Exception:
-    GEMINI_API_KEY = ""
-
-if not GEMINI_API_KEY:
-    st.error("Gemini API Key পাওয়া যায়নি। Streamlit Secrets পরীক্ষা করুন।")
+    st.error("Gemini API Key পাওয়া যাচ্ছে না। Streamlit Secrets পরীক্ষা করুন।")
     st.stop()
 
+client = genai.Client(api_key=GEMINI_API_KEY)
 
-# =========================================================
-# SIMPLE DESIGN
-# =========================================================
-
-st.markdown(
-    """
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-
-    [data-testid="stSidebar"] {
-        display: none;
-    }
-
-    .block-container {
-        max-width: 850px;
-        padding-top: 35px;
-        padding-bottom: 100px;
-    }
-
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-
-# =========================================================
-# HEADER
-# =========================================================
-
-st.title("📚 আলা হযরত AI")
-
-st.caption("কিতাবভিত্তিক ইসলামিক গবেষণা সহকারী")
-
+MODEL_NAME = "gemini-3.6-flash"
 
 # =========================================================
 # DATABASE
 # =========================================================
 
-@st.cache_resource
-def get_database():
+DB_FILE = Path("data/library.db")
 
-    if not DB_FILE.exists():
-        return None
+if not DB_FILE.exists():
+    st.error("লাইব্রেরি ডাটাবেস পাওয়া যায়নি।")
+    st.stop()
 
+
+def get_connection():
     return sqlite3.connect(
         f"file:{DB_FILE}?mode=ro",
-        uri=True,
-        check_same_thread=False
+        uri=True
     )
 
 
 # =========================================================
-# NORMALIZE TEXT
+# TEXT NORMALIZATION
 # =========================================================
 
 def normalize_text(text):
+    if not text:
+        return ""
 
     text = unicodedata.normalize("NFKC", text)
 
+    # Arabic tatweel
     text = text.replace("ـ", "")
 
-    text = re.sub(
-        r"[\u064B-\u065F\u0670]",
-        "",
-        text
-    )
+    # Arabic harakat
+    text = re.sub(r"[\u064B-\u065F\u0670]", "", text)
 
-    return text.lower().strip()
+    # Bengali punctuation / common punctuation
+    text = text.replace("।", " ")
+    text = text.replace(",", " ")
+    text = text.replace("،", " ")
+    text = text.replace(";", " ")
+    text = text.replace("؛", " ")
+    text = text.replace(":", " ")
+    text = text.replace("ঃ", " ")
+
+    return text.lower()
 
 
 # =========================================================
-# GET TOKENS
+# SEARCH WORDS
 # =========================================================
 
-def get_tokens(text):
+def get_search_words(question):
 
-    text = normalize_text(text)
+    normalized = normalize_text(question)
 
-    tokens = re.findall(
-        r"[\u0980-\u09FF\u0600-\u06FFA-Za-z0-9]+",
-        text
+    # শুধু meaningful শব্দ
+    words = re.findall(
+        r"[\u0980-\u09FF\u0600-\u06FFa-zA-Z0-9]+",
+        normalized
     )
 
-    stopwords = {
-        "কি", "কী", "কেন", "কিভাবে", "কীভাবে",
-        "এর", "এবং", "ও", "এই", "সে", "যে",
-        "থেকে", "জন্য", "সম্পর্কে", "বলুন",
-        "বলেন", "হয়", "হয়", "আছে", "ছিল",
-        "হবে", "করা", "করুন", "একটি", "একজন",
-
-        "ما", "هو", "في", "من", "عن",
-        "هل", "و", "يا", "قال"
+    # খুব ছোট সাধারণ শব্দ বাদ
+    stop_words = {
+        "কি",
+        "কী",
+        "কে",
+        "কেন",
+        "কোন",
+        "কোনটি",
+        "এর",
+        "এবং",
+        "ও",
+        "বা",
+        "যে",
+        "এই",
+        "সেই",
+        "তে",
+        "থেকে",
+        "সম্পর্কে",
+        "বিষয়ে",
+        "বিষয়",
+        "the",
+        "what",
+        "who",
+        "why",
+        "how",
+        "is",
+        "are",
+        "of",
+        "and"
     }
 
-    tokens = [
-        token
-        for token in tokens
-        if len(token) > 1
-        and token not in stopwords
+    words = [
+        word for word in words
+        if word not in stop_words and len(word) >= 2
     ]
 
-    return tokens
+    return words
 
 
 # =========================================================
@@ -147,316 +154,220 @@ def get_tokens(text):
 
 def search_library(question, limit=12):
 
-    conn = get_database()
+    words = get_search_words(question)
 
-    if conn is None:
+    if not words:
         return []
 
-    tokens = get_tokens(question)
-
-    if not tokens:
-        return []
-
+    conn = get_connection()
+    results = []
 
     # -----------------------------------------------------
-    # FTS SEARCH
+    # 1. FTS SEARCH
     # -----------------------------------------------------
 
     try:
-
-        query = " OR ".join(
-            '"' + token.replace('"', '') + '"'
-            for token in tokens[:15]
+        # OR search
+        fts_query = " OR ".join(
+            '"' + word.replace('"', '""') + '"'
+            for word in words
         )
 
         cursor = conn.execute(
             """
-            SELECT rowid
-            FROM pages_fts
+            SELECT
+                p.book,
+                p.pdf_page,
+                p.text
+            FROM pages_fts f
+            JOIN pages p
+                ON p.id = f.rowid
             WHERE pages_fts MATCH ?
-            ORDER BY bm25(pages_fts)
             LIMIT ?
             """,
-            (query, limit)
+            (fts_query, limit)
         )
 
-        ids = [
-            row[0]
-            for row in cursor.fetchall()
-        ]
-
-        if ids:
-
-            placeholders = ",".join(
-                "?" for _ in ids
-            )
-
-            cursor = conn.execute(
-                f"""
-                SELECT
-                    id,
-                    book,
-                    pdf_page,
-                    text
-                FROM pages
-                WHERE id IN ({placeholders})
-                """,
-                ids
-            )
-
-            rows = cursor.fetchall()
-
-            row_map = {
-                row[0]: row
-                for row in rows
-            }
-
-            results = [
-                row_map[i]
-                for i in ids
-                if i in row_map
-            ]
-
-            if results:
-                return results
+        results = cursor.fetchall()
 
     except Exception:
-        pass
-
+        results = []
 
     # -----------------------------------------------------
-    # NORMAL LIKE SEARCH
+    # 2. LIKE FALLBACK
     # -----------------------------------------------------
 
-    results = []
+    if len(results) < 5:
 
-    for token in tokens[:10]:
+        existing = {
+            (row[0], row[1])
+            for row in results
+        }
 
-        try:
+        for word in words:
 
-            cursor = conn.execute(
-                """
-                SELECT
-                    id,
-                    book,
-                    pdf_page,
-                    text
-                FROM pages
-                WHERE search_text LIKE ?
-                LIMIT ?
-                """,
-                (
-                    "%" + token + "%",
-                    limit
+            try:
+                cursor = conn.execute(
+                    """
+                    SELECT
+                        book,
+                        pdf_page,
+                        text
+                    FROM pages
+                    WHERE search_text LIKE ?
+                    LIMIT ?
+                    """,
+                    (f"%{word}%", limit)
                 )
-            )
 
-            rows = cursor.fetchall()
+                for row in cursor.fetchall():
 
-            for row in rows:
+                    key = (row[0], row[1])
 
-                if row not in results:
-                    results.append(row)
+                    if key not in existing:
+                        results.append(row)
+                        existing.add(key)
 
-                if len(results) >= limit:
-                    break
+                    if len(results) >= limit:
+                        break
 
-        except Exception:
-            continue
+            except Exception:
+                pass
 
-        if len(results) >= limit:
-            break
+            if len(results) >= limit:
+                break
 
+    conn.close()
 
     return results[:limit]
 
 
 # =========================================================
-# GEMINI CLIENT
+# ANSWER GENERATION
 # =========================================================
 
-@st.cache_resource
-def get_gemini_client():
-
-    return genai.Client(
-        api_key=GEMINI_API_KEY
-    )
-
-
-# =========================================================
-# ASK GEMINI
-# =========================================================
-
-def ask_gemini(question, results):
+def generate_answer(question, results):
 
     if not results:
-
-        return (
-            "দুঃখিত, লাইব্রেরিতে সংরক্ষিত "
-            "কিতাবসমূহে এই বিষয়ে নির্ভরযোগ্য "
-            "তথ্য পাওয়া যায়নি।"
-        )
-
+        return None
 
     context_parts = []
 
+    for book, page, text in results:
 
-    for row in results:
+        # খুব বড় page পাঠানো হবে না
+        clean_text = text.strip()
 
-        book = row[1]
-        page = row[2]
-        text = row[3]
-
-        text = text[:9000]
+        if len(clean_text) > 9000:
+            clean_text = clean_text[:9000]
 
         context_parts.append(
             f"""
-===============================
 কিতাব: {book}
 PDF পৃষ্ঠা: {page}
-===============================
 
-{text}
+পাঠ:
+{clean_text}
 """
         )
 
+    context = "\n\n------------------------------\n\n".join(
+        context_parts
+    )
 
-    context = "\n".join(context_parts)
+    prompt = f"""
+আপনি "আলা হযরত ডিজিটাল লাইব্রেরি"-এর গবেষণা সহকারী।
 
+ব্যবহারকারীর প্রশ্ন:
+{question}
 
-    # =====================================================
-    # AI INSTRUCTION
-    # =====================================================
+নিচে সংরক্ষিত কিতাবের PDF থেকে পাওয়া নির্দিষ্ট পৃষ্ঠার তথ্য দেওয়া হলো।
 
-    instruction = """
-
-আপনি "আলা হযরত AI" নামের একটি
-কিতাবভিত্তিক ইসলামিক গবেষণা সহকারী।
-
-আপনার উত্তর প্রদত্ত কিতাবের অংশের
-ভিত্তিতে দিতে হবে।
-
-কঠোর নিয়ম:
-
-১। নিজের মনগড়া তথ্য দেবেন না।
-
-২। কনটেক্সটে তথ্য না থাকলে উত্তর বানাবেন না।
-
-৩। কোনো আরবি ইবারত বানাবেন না।
-
-৪। কোনো হাদিস বানাবেন না।
-
-৫। কোনো আলেমের বক্তব্য বানাবেন না।
-
-৬। কোনো বইয়ের নাম বানাবেন না।
-
-৭। কোনো পৃষ্ঠা নম্বর বানাবেন না।
-
-৮। কনটেক্সটে থাকা বইয়ের নাম ও PDF
-পৃষ্ঠা পরিবর্তন করবেন না।
-
-৯। ব্যবহারকারী আরবি ইবারত চাইলে
-কনটেক্সটে থাকা আরবি ইবারত ব্যবহার করুন।
-
-১০। বাংলা অনুবাদ চাইলে অনুবাদ দিন।
-
-১১। প্রয়োজন হলে আগে আরবি ইবারত,
-তারপর বাংলা অনুবাদ ও ব্যাখ্যা দিন।
-
-১২। শেষে রেফারেন্স দিন।
-
-ফরম্যাট:
-
-রেফারেন্স:
-কিতাবের নাম — PDF পৃষ্ঠা
-
-"""
-
-
-    client = get_gemini_client()
-
-
-    response = client.models.generate_content(
-
-        model="gemini-3.6-flash",
-
-        contents=f"""
-লাইব্রেরি থেকে পাওয়া কিতাবের অংশ:
+==============================
+SOURCE MATERIAL
+==============================
 
 {context}
 
+==============================
+নির্দেশনা
+==============================
 
-ব্যবহারকারীর প্রশ্ন:
+১. শুধুমাত্র উপরের SOURCE MATERIAL-এর ভিত্তিতে উত্তর দিন।
 
-{question}
-""",
+২. SOURCE MATERIAL-এ উত্তর না থাকলে কোনো তথ্য নিজের থেকে বানাবেন না।
 
-        config=types.GenerateContentConfig(
-            system_instruction=instruction,
-            temperature=0.1
+৩. কোনো কিতাব, পৃষ্ঠা, লেখক বা উদ্ধৃতি অনুমান করবেন না।
+
+৪. উত্তর দেওয়ার সময় সংশ্লিষ্ট কিতাবের নাম এবং PDF পৃষ্ঠা নম্বর উল্লেখ করুন।
+
+৫. SOURCE MATERIAL-এ আরবি ইবারত থাকলে প্রয়োজন অনুযায়ী মূল আরবি ইবারত দিন।
+
+৬. ব্যবহারকারী যদি দলিল বা রেফারেন্স চান, তাহলে SOURCE MATERIAL-এর মধ্যেই থাকা তথ্য ব্যবহার করুন।
+
+৭. একই বিষয়ের একাধিক পৃষ্ঠা থাকলে প্রয়োজন অনুযায়ী একাধিক রেফারেন্স দিন।
+
+৮. উত্তর পরিষ্কার, সংক্ষিপ্ত এবং গবেষণামূলক বাংলা ভাষায় দিন।
+
+৯. SOURCE MATERIAL-এর বাইরে কোনো তথ্যকে কিতাবের বক্তব্য হিসেবে উপস্থাপন করবেন না।
+
+১০. যদি SOURCE MATERIAL যথেষ্ট না হয়, পরিষ্কারভাবে বলুন যে প্রদত্ত কিতাবের পাওয়া অংশে প্রশ্নটির পর্যাপ্ত তথ্য পাওয়া যায়নি।
+
+প্রশ্নের উত্তর দিন।
+"""
+
+    try:
+
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=prompt
         )
-    )
 
+        return response.text
 
-    return response.text
+    except Exception as e:
+
+        return f"AI উত্তর দিতে সমস্যা হয়েছে: {e}"
 
 
 # =========================================================
-# CHAT MEMORY
+# HEADER
+# =========================================================
+
+st.markdown(
+    '<div class="main-title">📚 আলা হযরত ডিজিটাল লাইব্রেরি</div>',
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    '<div class="subtitle">সংরক্ষিত কিতাবসমূহ থেকে তথ্য অনুসন্ধান করুন</div>',
+    unsafe_allow_html=True
+)
+
+# =========================================================
+# SESSION
 # =========================================================
 
 if "messages" not in st.session_state:
-
     st.session_state.messages = []
 
 
 # =========================================================
-# FIRST PAGE
-# =========================================================
-
-if len(st.session_state.messages) == 0:
-
-    st.write("")
-    st.write("")
-    st.write("")
-    st.write("")
-
-    st.markdown(
-        "<h2 style='text-align:center;'>কী জানতে চান?</h2>",
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        "<p style='text-align:center;'>"
-        "আপনার ইসলামিক প্রশ্ন লিখুন এবং "
-        "আলা হযরত AI-কে জিজ্ঞাসা করুন।"
-        "</p>",
-        unsafe_allow_html=True
-    )
-
-    st.write("")
-    st.write("")
-
-
-# =========================================================
-# SHOW CHAT
+# OLD MESSAGES
 # =========================================================
 
 for message in st.session_state.messages:
 
     with st.chat_message(message["role"]):
-
-        st.markdown(
-            message["content"]
-        )
+        st.markdown(message["content"])
 
 
 # =========================================================
-# INPUT
+# CHAT INPUT
 # =========================================================
 
-prompt = st.chat_input(
-    "আপনার প্রশ্ন লিখুন..."
+question = st.chat_input(
+    "আপনার ইসলামিক প্রশ্ন লিখুন..."
 )
 
 
@@ -464,49 +375,44 @@ prompt = st.chat_input(
 # PROCESS QUESTION
 # =========================================================
 
-if prompt:
+if question:
 
-    # User message
     st.session_state.messages.append(
         {
             "role": "user",
-            "content": prompt
+            "content": question
         }
     )
 
     with st.chat_message("user"):
+        st.markdown(question)
 
-        st.markdown(prompt)
-
-
-    # AI answer
     with st.chat_message("assistant"):
 
-        with st.spinner("কিতাবসমূহে খোঁজা হচ্ছে..."):
+        with st.spinner("কিতাবসমূহ থেকে তথ্য খোঁজা হচ্ছে..."):
 
-            try:
+            results = search_library(
+                question,
+                limit=12
+            )
 
-                results = search_library(
-                    prompt,
-                    limit=12
+            if not results:
+
+                answer = (
+                    "দুঃখিত, সংরক্ষিত কিতাবসমূহে "
+                    "এই প্রশ্নের সঙ্গে সম্পর্কিত নির্ভরযোগ্য তথ্য "
+                    "খুঁজে পাওয়া যায়নি।"
                 )
 
-                answer = ask_gemini(
-                    prompt,
+            else:
+
+                answer = generate_answer(
+                    question,
                     results
                 )
 
-            except Exception as e:
+            st.markdown(answer)
 
-                answer = (
-                    "দুঃখিত, উত্তর দিতে সমস্যা হয়েছে। "
-                    "কিছুক্ষণ পর আবার চেষ্টা করুন।"
-                )
-
-        st.markdown(answer)
-
-
-    # Save answer
     st.session_state.messages.append(
         {
             "role": "assistant",
