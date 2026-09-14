@@ -27,10 +27,15 @@ st.markdown("""
     font-weight: 700;
     margin-top: 20px;
 }
+
 .subtitle {
     text-align: center;
     color: #777;
     margin-bottom: 30px;
+}
+
+div[data-testid="stChatMessage"] {
+    border-radius: 12px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -40,14 +45,14 @@ st.markdown("""
 # =========================================================
 
 try:
-    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+    API_KEY = st.secrets["GEMINI_API_KEY"]
 except Exception:
-    st.error("Gemini API Key পাওয়া যাচ্ছে না। Streamlit Secrets পরীক্ষা করুন।")
+    st.error("Gemini API Key পাওয়া যায়নি।")
     st.stop()
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+client = genai.Client(api_key=API_KEY)
 
-MODEL_NAME = "gemini-3.6-flash"
+MODEL = "gemini-3.6-flash"
 
 # =========================================================
 # DATABASE
@@ -60,7 +65,7 @@ if not DB_FILE.exists():
     st.stop()
 
 
-def get_connection():
+def db_connect():
     return sqlite3.connect(
         f"file:{DB_FILE}?mode=ro",
         uri=True
@@ -68,10 +73,11 @@ def get_connection():
 
 
 # =========================================================
-# TEXT NORMALIZATION
+# NORMALIZE
 # =========================================================
 
-def normalize_text(text):
+def normalize(text):
+
     if not text:
         return ""
 
@@ -81,132 +87,134 @@ def normalize_text(text):
     text = text.replace("ـ", "")
 
     # Arabic harakat
-    text = re.sub(r"[\u064B-\u065F\u0670]", "", text)
+    text = re.sub(
+        r"[\u064B-\u065F\u0670]",
+        "",
+        text
+    )
 
-    # Bengali punctuation / common punctuation
-    text = text.replace("।", " ")
-    text = text.replace(",", " ")
-    text = text.replace("،", " ")
-    text = text.replace(";", " ")
-    text = text.replace("؛", " ")
-    text = text.replace(":", " ")
-    text = text.replace("ঃ", " ")
+    # Bengali punctuation
+    punctuation = [
+        "।", ",", "،", ";", "؛", ":",
+        "?", "!", "(", ")", "[", "]",
+        "{", "}", '"', "'"
+    ]
+
+    for p in punctuation:
+        text = text.replace(p, " ")
 
     return text.lower()
 
 
 # =========================================================
-# SEARCH WORDS
+# GEMINI SEARCH TERM GENERATOR
 # =========================================================
 
-def get_search_words(question):
+def create_search_terms(question):
 
-    normalized = normalize_text(question)
+    prompt = f"""
+আপনি একটি ইসলামিক ডিজিটাল লাইব্রেরির Search Engine-এর সহকারী।
 
-    # শুধু meaningful শব্দ
-    words = re.findall(
-        r"[\u0980-\u09FF\u0600-\u06FFa-zA-Z0-9]+",
-        normalized
-    )
+ব্যবহারকারীর প্রশ্ন:
+{question}
 
-    # খুব ছোট সাধারণ শব্দ বাদ
-    stop_words = {
-        "কি",
-        "কী",
-        "কে",
-        "কেন",
-        "কোন",
-        "কোনটি",
-        "এর",
-        "এবং",
-        "ও",
-        "বা",
-        "যে",
-        "এই",
-        "সেই",
-        "তে",
-        "থেকে",
-        "সম্পর্কে",
-        "বিষয়ে",
-        "বিষয়",
-        "the",
-        "what",
-        "who",
-        "why",
-        "how",
-        "is",
-        "are",
-        "of",
-        "and"
-    }
+এই প্রশ্নটি বুঝে এমন ১০-১৫টি গুরুত্বপূর্ণ অনুসন্ধান-শব্দ তৈরি করুন,
+যেগুলো একটি ইসলামিক কিতাবের PDF-এ থাকতে পারে।
 
-    words = [
-        word for word in words
-        if word not in stop_words and len(word) >= 2
-    ]
+বিশেষভাবে:
 
-    return words
+- বাংলা প্রশ্ন হলে তার গুরুত্বপূর্ণ আরবি শব্দ দিন।
+- প্রয়োজন হলে উর্দু শব্দ দিন।
+- আলেম, ব্যক্তি, কিতাব, বিষয় বা পরিভাষার সম্ভাব্য বানান দিন।
+- আরবি শব্দের বিভিন্ন প্রচলিত বানান বিবেচনা করুন।
+- অপ্রয়োজনীয় সাধারণ শব্দ দেবেন না।
 
+শুধু search terms দিন।
+প্রতিটি term নতুন লাইনে লিখুন।
+কোনো ব্যাখ্যা দেবেন না।
 
-# =========================================================
-# SEARCH DATABASE
-# =========================================================
+উদাহরণ:
 
-def search_library(question, limit=12):
-
-    words = get_search_words(question)
-
-    if not words:
-        return []
-
-    conn = get_connection()
-    results = []
-
-    # -----------------------------------------------------
-    # 1. FTS SEARCH
-    # -----------------------------------------------------
+احمد رضا خان
+اعلی حضرت
+امام احمد رضا
+رضا خان
+اعلی حضرت بریلوی
+تصوف
+شریعت
+طریقت
+"""
 
     try:
-        # OR search
-        fts_query = " OR ".join(
-            '"' + word.replace('"', '""') + '"'
-            for word in words
+
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=prompt
         )
 
-        cursor = conn.execute(
-            """
-            SELECT
-                p.book,
-                p.pdf_page,
-                p.text
-            FROM pages_fts f
-            JOIN pages p
-                ON p.id = f.rowid
-            WHERE pages_fts MATCH ?
-            LIMIT ?
-            """,
-            (fts_query, limit)
-        )
+        text = response.text.strip()
 
-        results = cursor.fetchall()
+        terms = []
+
+        for line in text.splitlines():
+
+            line = line.strip()
+
+            line = re.sub(
+                r"^[\-\*\d\.\)\s]+",
+                "",
+                line
+            )
+
+            if line and len(line) >= 2:
+                terms.append(line)
+
+        # Original question-ও রাখি
+        terms.append(question)
+
+        # duplicate বাদ
+        final_terms = []
+
+        for term in terms:
+
+            if term not in final_terms:
+                final_terms.append(term)
+
+        return final_terms[:20]
 
     except Exception:
-        results = []
+
+        return [question]
+
+
+# =========================================================
+# DATABASE SEARCH
+# =========================================================
+
+def search_database(terms, limit=20):
+
+    conn = db_connect()
+
+    found = {}
 
     # -----------------------------------------------------
-    # 2. LIKE FALLBACK
+    # প্রতিটি search term দিয়ে LIKE search
     # -----------------------------------------------------
 
-    if len(results) < 5:
+    for term in terms:
 
-        existing = {
-            (row[0], row[1])
-            for row in results
-        }
+        words = re.findall(
+            r"[\u0980-\u09FF\u0600-\u06FFa-zA-Z0-9]+",
+            normalize(term)
+        )
 
         for word in words:
 
+            if len(word) < 2:
+                continue
+
             try:
+
                 cursor = conn.execute(
                     """
                     SELECT
@@ -215,111 +223,138 @@ def search_library(question, limit=12):
                         text
                     FROM pages
                     WHERE search_text LIKE ?
-                    LIMIT ?
+                    LIMIT 15
                     """,
-                    (f"%{word}%", limit)
+                    (f"%{word}%",)
                 )
 
-                for row in cursor.fetchall():
+                rows = cursor.fetchall()
 
-                    key = (row[0], row[1])
+                for book, page, text in rows:
 
-                    if key not in existing:
-                        results.append(row)
-                        existing.add(key)
+                    key = (book, page)
 
-                    if len(results) >= limit:
-                        break
+                    if key not in found:
+
+                        found[key] = {
+                            "book": book,
+                            "page": page,
+                            "text": text,
+                            "score": 0
+                        }
+
+                    found[key]["score"] += 1
 
             except Exception:
                 pass
 
-            if len(results) >= limit:
-                break
-
     conn.close()
+
+    # -----------------------------------------------------
+    # score অনুযায়ী সাজানো
+    # -----------------------------------------------------
+
+    results = list(found.values())
+
+    results.sort(
+        key=lambda x: x["score"],
+        reverse=True
+    )
 
     return results[:limit]
 
 
 # =========================================================
-# ANSWER GENERATION
+# GEMINI ANSWER
 # =========================================================
 
-def generate_answer(question, results):
+def answer_from_books(question, results):
 
     if not results:
         return None
 
-    context_parts = []
+    source_blocks = []
 
-    for book, page, text in results:
+    for item in results:
 
-        # খুব বড় page পাঠানো হবে না
-        clean_text = text.strip()
+        text = item["text"].strip()
 
-        if len(clean_text) > 9000:
-            clean_text = clean_text[:9000]
+        # অত্যন্ত বড় page হলে সীমিত করা
+        if len(text) > 10000:
+            text = text[:10000]
 
-        context_parts.append(
+        source_blocks.append(
             f"""
-কিতাব: {book}
-PDF পৃষ্ঠা: {page}
+==============================
+কিতাবের নাম: {item["book"]}
+PDF পৃষ্ঠা: {item["page"]}
+==============================
 
-পাঠ:
-{clean_text}
+{text}
 """
         )
 
-    context = "\n\n------------------------------\n\n".join(
-        context_parts
-    )
+    sources = "\n\n".join(source_blocks)
 
     prompt = f"""
-আপনি "আলা হযরত ডিজিটাল লাইব্রেরি"-এর গবেষণা সহকারী।
+আপনি "আলা হযরত ডিজিটাল লাইব্রেরি"-এর একজন গবেষণা সহকারী।
 
 ব্যবহারকারীর প্রশ্ন:
+
 {question}
 
-নিচে সংরক্ষিত কিতাবের PDF থেকে পাওয়া নির্দিষ্ট পৃষ্ঠার তথ্য দেওয়া হলো।
+নিচে লাইব্রেরিতে সংরক্ষিত PDF কিতাব থেকে পাওয়া সম্ভাব্য
+প্রাসঙ্গিক পৃষ্ঠার লেখা দেওয়া হলো।
 
-==============================
-SOURCE MATERIAL
-==============================
+আপনার কাজ হলো শুধুমাত্র এই SOURCE MATERIAL-এর ভিত্তিতে উত্তর দেওয়া।
 
-{context}
+SOURCE MATERIAL:
 
-==============================
-নির্দেশনা
-==============================
+{sources}
 
-১. শুধুমাত্র উপরের SOURCE MATERIAL-এর ভিত্তিতে উত্তর দিন।
+==================================================
+কঠোর নিয়ম
+==================================================
 
-২. SOURCE MATERIAL-এ উত্তর না থাকলে কোনো তথ্য নিজের থেকে বানাবেন না।
+১. SOURCE MATERIAL-এর বাইরে থেকে কোনো তথ্যকে কিতাবের বক্তব্য
+হিসেবে লিখবেন না।
 
-৩. কোনো কিতাব, পৃষ্ঠা, লেখক বা উদ্ধৃতি অনুমান করবেন না।
+২. কোনো উদ্ধৃতি বানাবেন না।
 
-৪. উত্তর দেওয়ার সময় সংশ্লিষ্ট কিতাবের নাম এবং PDF পৃষ্ঠা নম্বর উল্লেখ করুন।
+৩. কোনো কিতাবের নাম বা পৃষ্ঠা নম্বর অনুমান করবেন না।
 
-৫. SOURCE MATERIAL-এ আরবি ইবারত থাকলে প্রয়োজন অনুযায়ী মূল আরবি ইবারত দিন।
+৪. প্রশ্নের উত্তর SOURCE MATERIAL-এ থাকলে পরিষ্কারভাবে উত্তর দিন।
 
-৬. ব্যবহারকারী যদি দলিল বা রেফারেন্স চান, তাহলে SOURCE MATERIAL-এর মধ্যেই থাকা তথ্য ব্যবহার করুন।
+৫. গুরুত্বপূর্ণ হলে মূল আরবি ইবারত হুবহু দিন।
 
-৭. একই বিষয়ের একাধিক পৃষ্ঠা থাকলে প্রয়োজন অনুযায়ী একাধিক রেফারেন্স দিন।
+৬. আরবি ইবারতের পরে বাংলা অনুবাদ দিন।
 
-৮. উত্তর পরিষ্কার, সংক্ষিপ্ত এবং গবেষণামূলক বাংলা ভাষায় দিন।
+৭. রেফারেন্সের ক্ষেত্রে এই ফরম্যাট ব্যবহার করুন:
 
-৯. SOURCE MATERIAL-এর বাইরে কোনো তথ্যকে কিতাবের বক্তব্য হিসেবে উপস্থাপন করবেন না।
+📚 কিতাব: [কিতাবের নাম]
+📄 PDF পৃষ্ঠা: [পৃষ্ঠা নম্বর]
 
-১০. যদি SOURCE MATERIAL যথেষ্ট না হয়, পরিষ্কারভাবে বলুন যে প্রদত্ত কিতাবের পাওয়া অংশে প্রশ্নটির পর্যাপ্ত তথ্য পাওয়া যায়নি।
+৮. একাধিক কিতাব বা পৃষ্ঠা থেকে তথ্য পাওয়া গেলে প্রত্যেকটির
+রেফারেন্স আলাদাভাবে দিন।
 
-প্রশ্নের উত্তর দিন।
+৯. SOURCE MATERIAL যথেষ্ট না হলে বলুন:
+
+"সংরক্ষিত কিতাবের পাওয়া অংশে এই প্রশ্নের পর্যাপ্ত তথ্য পাওয়া যায়নি।"
+
+১০. নিজের সাধারণ জ্ঞান দিয়ে শূন্যস্থান পূরণ করবেন না।
+
+১১. ইসলামিক বিষয়ে মতামত দেওয়ার সময় SOURCE MATERIAL-এর বক্তব্যকে
+প্রাধান্য দিন।
+
+১২. উত্তর বাংলা ভাষায় দিন।
+
+এখন প্রশ্নটির উত্তর দিন।
 """
 
     try:
 
         response = client.models.generate_content(
-            model=MODEL_NAME,
+            model=MODEL,
             contents=prompt
         )
 
@@ -327,7 +362,7 @@ SOURCE MATERIAL
 
     except Exception as e:
 
-        return f"AI উত্তর দিতে সমস্যা হয়েছে: {e}"
+        return "AI উত্তর দিতে সমস্যা হয়েছে।"
 
 
 # =========================================================
@@ -340,21 +375,17 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="subtitle">সংরক্ষিত কিতাবসমূহ থেকে তথ্য অনুসন্ধান করুন</div>',
+    '<div class="subtitle">সংরক্ষিত কিতাবসমূহ থেকে জিজ্ঞাসা করুন</div>',
     unsafe_allow_html=True
 )
 
 # =========================================================
-# SESSION
+# CHAT HISTORY
 # =========================================================
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-
-# =========================================================
-# OLD MESSAGES
-# =========================================================
 
 for message in st.session_state.messages:
 
@@ -372,7 +403,7 @@ question = st.chat_input(
 
 
 # =========================================================
-# PROCESS QUESTION
+# QUESTION PROCESSING
 # =========================================================
 
 if question:
@@ -391,24 +422,29 @@ if question:
 
         with st.spinner("কিতাবসমূহ থেকে তথ্য খোঁজা হচ্ছে..."):
 
-            results = search_library(
-                question,
-                limit=12
+            # ১. বাংলা প্রশ্ন থেকে search terms
+            search_terms = create_search_terms(question)
+
+            # ২. database search
+            results = search_database(
+                search_terms,
+                limit=20
             )
 
-            if not results:
+            # ৩. AI answer
+            if results:
 
-                answer = (
-                    "দুঃখিত, সংরক্ষিত কিতাবসমূহে "
-                    "এই প্রশ্নের সঙ্গে সম্পর্কিত নির্ভরযোগ্য তথ্য "
-                    "খুঁজে পাওয়া যায়নি।"
+                answer = answer_from_books(
+                    question,
+                    results
                 )
 
             else:
 
-                answer = generate_answer(
-                    question,
-                    results
+                answer = (
+                    "দুঃখিত, সংরক্ষিত কিতাবসমূহে "
+                    "এই প্রশ্নের সঙ্গে সম্পর্কিত "
+                    "নির্ভরযোগ্য তথ্য পাওয়া যায়নি।"
                 )
 
             st.markdown(answer)
