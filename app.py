@@ -36,7 +36,7 @@ if not GEMINI_API_KEY:
 
 
 # =========================================================
-# DESIGN
+# CSS / DESIGN
 # =========================================================
 
 st.markdown("""
@@ -58,68 +58,103 @@ footer {
     display: none;
 }
 
+/* Main container */
 .block-container {
-    max-width: 850px;
-    padding-top: 35px;
-    padding-bottom: 100px;
+    max-width: 900px !important;
+    padding-top: 30px !important;
+    padding-bottom: 110px !important;
+    padding-left: 20px !important;
+    padding-right: 20px !important;
 }
 
+
+/* Header */
 .title {
     text-align: center;
-    font-size: 30px;
+    font-size: 32px;
     font-weight: 700;
     margin-top: 10px;
+    line-height: 1.4;
 }
 
 .subtitle {
     text-align: center;
     color: #777;
-    margin-top: 8px;
-    font-size: 14px;
-}
-
-.welcome {
-    text-align: center;
-    margin-top: 115px;
-    margin-bottom: 35px;
-}
-
-.welcome h2 {
-    font-size: 26px;
-    font-weight: 600;
-}
-
-.welcome p {
-    color: #777;
     font-size: 15px;
+    margin-top: 6px;
 }
 
+
+/* Welcome */
+.welcome-box {
+    min-height: 55vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 20px;
+}
+
+.welcome-icon {
+    font-size: 52px;
+    margin-bottom: 12px;
+}
+
+.welcome-title {
+    font-size: 30px;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+.welcome-text {
+    font-size: 16px;
+    color: #777;
+    max-width: 600px;
+    line-height: 1.8;
+}
+
+
+/* Chat input */
 [data-testid="stChatInput"] {
-    max-width: 850px;
+    max-width: 900px;
     margin-left: auto;
     margin-right: auto;
 }
 
+
+/* Mobile */
 @media (max-width: 600px) {
 
     .block-container {
-        padding-left: 15px;
-        padding-right: 15px;
-        padding-top: 25px;
+        padding-top: 20px !important;
+        padding-left: 12px !important;
+        padding-right: 12px !important;
     }
 
     .title {
+        font-size: 25px;
+    }
+
+    .subtitle {
+        font-size: 13px;
+    }
+
+    .welcome-box {
+        min-height: 58vh;
+    }
+
+    .welcome-icon {
+        font-size: 44px;
+    }
+
+    .welcome-title {
         font-size: 24px;
     }
 
-    .welcome {
-        margin-top: 70px;
+    .welcome-text {
+        font-size: 14px;
     }
-
-    .welcome h2 {
-        font-size: 22px;
-    }
-
 }
 
 </style>
@@ -159,7 +194,7 @@ def get_database():
 
 
 # =========================================================
-# TEXT NORMALIZATION
+# NORMALIZE
 # =========================================================
 
 def normalize_text(text):
@@ -169,18 +204,18 @@ def normalize_text(text):
     # Arabic Tatweel
     text = text.replace("ـ", "")
 
-    # Arabic Harakat
+    # Arabic harakat
     text = re.sub(
         r"[\u064B-\u065F\u0670]",
         "",
         text
     )
 
-    return text.lower()
+    return text.lower().strip()
 
 
 # =========================================================
-# QUESTION TOKENS
+# TOKENS
 # =========================================================
 
 def get_tokens(text):
@@ -193,63 +228,29 @@ def get_tokens(text):
     )
 
     stopwords = {
+        "কি", "কী", "কেন", "কিভাবে", "কীভাবে",
+        "এর", "এবং", "ও", "এই", "সে", "যে",
+        "থেকে", "জন্য", "সম্পর্কে", "বলুন",
+        "বলেন", "হয়", "হয়", "আছে", "ছিল",
+        "হবে", "করা", "করুন", "একটি",
+        "একজন", "সম্পর্কে",
 
-        # Bengali
-        "কি",
-        "কী",
-        "কেন",
-        "কিভাবে",
-        "কীভাবে",
-        "এর",
-        "এবং",
-        "ও",
-        "এই",
-        "সে",
-        "যে",
-        "থেকে",
-        "জন্য",
-        "সম্পর্কে",
-        "বলুন",
-        "বলেন",
-        "হয়",
-        "হয়",
-        "আছে",
-        "ছিল",
-        "হবে",
-        "করা",
-        "করুন",
-        "একটি",
-        "একজন",
-
-        # Arabic
-        "ما",
-        "هو",
-        "في",
-        "من",
-        "عن",
-        "هل",
-        "و",
-        "يا",
-        "قال",
-        "هذه",
-        "هذا",
-        "ذلك",
-        "التي",
-        "الذي"
+        "ما", "هو", "في", "من", "عن",
+        "هل", "و", "يا", "قال",
+        "هذه", "هذا", "ذلك",
+        "التي", "الذي"
     }
 
-    tokens = [
+    return [
         token
         for token in tokens
         if len(token) > 1
         and token not in stopwords
     ]
 
-    return tokens
-
 
 # =========================================================
-# SEARCH LIBRARY
+# LIBRARY SEARCH
 # =========================================================
 
 def search_library(question, limit=12):
@@ -265,13 +266,15 @@ def search_library(question, limit=12):
         return []
 
 
-    # -----------------------------------------------------
-    # প্রথমে AND Search
-    # -----------------------------------------------------
+    # =====================================================
+    # 1. FTS AND SEARCH
+    # =====================================================
+
+    results = []
 
     and_query = " AND ".join(
         '"' + token.replace('"', '') + '"'
-        for token in tokens[:12]
+        for token in tokens[:10]
     )
 
     try:
@@ -284,10 +287,7 @@ def search_library(question, limit=12):
             ORDER BY bm25(pages_fts)
             LIMIT ?
             """,
-            (
-                and_query,
-                limit
-            )
+            (and_query, limit)
         )
 
         ids = [
@@ -295,20 +295,51 @@ def search_library(question, limit=12):
             for row in cursor.fetchall()
         ]
 
+        if ids:
+
+            placeholders = ",".join(
+                "?" for _ in ids
+            )
+
+            cursor = conn.execute(
+                f"""
+                SELECT
+                    id,
+                    book,
+                    pdf_page,
+                    text
+                FROM pages
+                WHERE id IN ({placeholders})
+                """,
+                ids
+            )
+
+            data = cursor.fetchall()
+
+            data_dict = {
+                row[0]: row
+                for row in data
+            }
+
+            results = [
+                data_dict[i]
+                for i in ids
+                if i in data_dict
+            ]
+
     except Exception:
+        results = []
 
-        ids = []
 
+    # =====================================================
+    # 2. FTS OR SEARCH
+    # =====================================================
 
-    # -----------------------------------------------------
-    # AND না পেলে OR Search
-    # -----------------------------------------------------
-
-    if not ids:
+    if not results:
 
         or_query = " OR ".join(
             '"' + token.replace('"', '') + '"'
-            for token in tokens[:18]
+            for token in tokens[:15]
         )
 
         try:
@@ -321,10 +352,7 @@ def search_library(question, limit=12):
                 ORDER BY bm25(pages_fts)
                 LIMIT ?
                 """,
-                (
-                    or_query,
-                    limit
-                )
+                (or_query, limit)
             )
 
             ids = [
@@ -332,58 +360,88 @@ def search_library(question, limit=12):
                 for row in cursor.fetchall()
             ]
 
+            if ids:
+
+                placeholders = ",".join(
+                    "?" for _ in ids
+                )
+
+                cursor = conn.execute(
+                    f"""
+                    SELECT
+                        id,
+                        book,
+                        pdf_page,
+                        text
+                    FROM pages
+                    WHERE id IN ({placeholders})
+                    """,
+                    ids
+                )
+
+                data = cursor.fetchall()
+
+                data_dict = {
+                    row[0]: row
+                    for row in data
+                }
+
+                results = [
+                    data_dict[i]
+                    for i in ids
+                    if i in data_dict
+                ]
+
         except Exception:
-
-            ids = []
-
-
-    if not ids:
-        return []
+            results = []
 
 
-    # -----------------------------------------------------
-    # Database থেকে সম্পূর্ণ তথ্য নেওয়া
-    # -----------------------------------------------------
+    # =====================================================
+    # 3. LIKE FALLBACK
+    # =====================================================
+    # FTS কাজ না করলেও সাধারণ SQLite search করবে।
 
-    placeholders = ",".join(
-        "?"
-        for _ in ids
-    )
+    if not results:
 
-    try:
+        for token in tokens[:8]:
 
-        cursor = conn.execute(
-            f"""
-            SELECT
-                id,
-                book,
-                pdf_page,
-                text
-            FROM pages
-            WHERE id IN ({placeholders})
-            """,
-            ids
-        )
+            try:
 
-        data = cursor.fetchall()
+                cursor = conn.execute(
+                    """
+                    SELECT
+                        id,
+                        book,
+                        pdf_page,
+                        text
+                    FROM pages
+                    WHERE search_text LIKE ?
+                    LIMIT ?
+                    """,
+                    (
+                        "%" + token + "%",
+                        limit
+                    )
+                )
 
-    except Exception:
+                rows = cursor.fetchall()
 
-        return []
+                for row in rows:
+
+                    if row not in results:
+                        results.append(row)
+
+                    if len(results) >= limit:
+                        break
+
+            except Exception:
+                continue
+
+            if len(results) >= limit:
+                break
 
 
-    data_dict = {
-        row[0]: row
-        for row in data
-    }
-
-    results = [
-        data_dict[item]
-        for item in ids
-        if item in data_dict
-    ]
-
-    return results
+    return results[:limit]
 
 
 # =========================================================
@@ -414,7 +472,7 @@ def ask_gemini(question, search_results):
 
 
     # =====================================================
-    # CREATE CONTEXT
+    # BUILD CONTEXT
     # =====================================================
 
     context_parts = []
@@ -422,17 +480,17 @@ def ask_gemini(question, search_results):
     for row in search_results:
 
         book = row[1]
-        page = row[2]
+        pdf_page = row[2]
         text = row[3]
 
-        # প্রতিটি পৃষ্ঠা থেকে সর্বোচ্চ ১০,০০০ অক্ষর
-        text = text[:10000]
+        # প্রতি পৃষ্ঠা থেকে সর্বোচ্চ ৯০০০ অক্ষর
+        text = text[:9000]
 
         context_parts.append(
             f"""
 ==================================================
 কিতাবের নাম: {book}
-PDF পৃষ্ঠা: {page}
+PDF পৃষ্ঠা: {pdf_page}
 ==================================================
 
 {text}
@@ -452,76 +510,72 @@ PDF পৃষ্ঠা: {page}
 আপনি "আলা হযরত AI" নামের একটি
 কিতাবভিত্তিক ইসলামিক গবেষণা সহকারী।
 
-আপনার কাছে লাইব্রেরি থেকে যে কিতাবের
-অংশ সরবরাহ করা হয়েছে, তার ভিত্তিতেই
-উত্তর প্রদান করবেন।
+আপনাকে লাইব্রেরির PDF থেকে প্রাসঙ্গিক
+কিতাবের অংশ দেওয়া হয়েছে।
 
-কঠোরভাবে নিচের নিয়মগুলো অনুসরণ করবেন:
+আপনার কাজ হলো সেই কিতাবের অংশের
+ভিত্তিতে ব্যবহারকারীর প্রশ্নের উত্তর দেওয়া।
 
-১। নিজের মনগড়া তথ্য তৈরি করবেন না।
+অত্যন্ত গুরুত্বপূর্ণ:
+
+১। কনটেক্সটে তথ্য থাকলে তার ভিত্তিতেই উত্তর দিন।
 
 ২। কনটেক্সটে তথ্য না থাকলে নিজের সাধারণ
 জ্ঞান দিয়ে উত্তর বানাবেন না।
 
-৩। কোনো আরবি ইবারত, হাদিস, ফতোয়া,
-আলেমের বক্তব্য বা উদ্ধৃতি বানিয়ে লিখবেন না।
+৩। কোনো আরবি ইবারত বানাবেন না।
 
-৪। কোনো পৃষ্ঠা নম্বর অনুমান করবেন না।
+৪। কোনো হাদিস বানাবেন না।
 
-৫। শুধুমাত্র কনটেক্সটে দেওয়া কিতাবের নাম
-ও PDF পৃষ্ঠা ব্যবহার করবেন।
+৫। কোনো আলেমের বক্তব্য বানাবেন না।
 
-৬। ব্যবহারকারী আরবি ইবারত চাইলে,
-কনটেক্সটে থাকা আরবি ইবারতই প্রদান করবেন।
+৬। কোনো বইয়ের নাম বানাবেন না।
 
-৭। ব্যবহারকারী বাংলা অনুবাদ চাইলে,
-আরবি ইবারতের বাংলা অনুবাদ প্রদান করবেন।
+৭। কোনো পৃষ্ঠা নম্বর বানাবেন না।
 
-৮। কোনো ইবারত অসম্পূর্ণ থাকলে নিজের পক্ষ
-থেকে তা পূরণ করবেন না।
+৮। PDF পৃষ্ঠা পরিবর্তন করবেন না।
 
-৯। একাধিক কিতাবে তথ্য থাকলে প্রয়োজন অনুযায়ী
+৯। ব্যবহারকারী আরবি ইবারত চাইলে,
+কনটেক্সটে থাকা আরবি ইবারত ব্যবহার করবেন।
+
+১০। ব্যবহারকারী বাংলা অনুবাদ চাইলে,
+আরবি ইবারতের বাংলা অনুবাদ দিন।
+
+১১। সম্ভব হলে উত্তর এভাবে সাজান:
+
+আরবি ইবারত:
+[কনটেক্সটে থাকা ইবারত]
+
+বাংলা অনুবাদ:
+[অনুবাদ]
+
+ব্যাখ্যা:
+[প্রাসঙ্গিক ব্যাখ্যা]
+
+রেফারেন্স:
+[কিতাবের নাম] — PDF পৃষ্ঠা [নম্বর]
+
+১২। একাধিক কিতাবে তথ্য পাওয়া গেলে
 একাধিক রেফারেন্স দিতে পারেন।
 
-১০। উত্তর পরিষ্কার, সুন্দর ও গবেষণামূলক হবে।
-
-১১। সম্ভব হলে প্রথমে আরবি ইবারত,
-তারপর বাংলা অনুবাদ/ব্যাখ্যা দেবেন।
-
-১২। কোনো কাল্পনিক রেফারেন্স তৈরি করবেন না।
-
-১৩। কনটেক্সটে থাকা PDF পৃষ্ঠা পরিবর্তন করবেন না।
-
-১৪। PDF পৃষ্ঠা এবং মূল কিতাবের পৃষ্ঠা
-একই বিষয় নয়। তাই কেবল দেওয়া PDF
-পৃষ্ঠা উল্লেখ করবেন।
-
-১৫। তথ্য পাওয়া না গেলে অবশ্যই বলবেন:
+১৩। কনটেক্সটে কোনো তথ্য না থাকলে
+স্পষ্টভাবে বলবেন:
 
 "দুঃখিত, লাইব্রেরিতে সংরক্ষিত
 কিতাবসমূহে এই বিষয়ে নির্ভরযোগ্য
 তথ্য পাওয়া যায়নি।"
 
-১৬। ব্যবহারকারী নির্দিষ্ট কোনো কিতাবের
-নাম উল্লেখ করলে, কনটেক্সটে সেই কিতাবের
-তথ্য থাকলে সেটিকে অগ্রাধিকার দেবেন।
+১৪। কোনো কাল্পনিক রেফারেন্স তৈরি করবেন না।
 
-১৭। আয়াত, হাদিস বা কোনো আলেমের বক্তব্য
-উদ্ধৃত করার সময় কনটেক্সটে থাকা তথ্যের
-বাইরে গিয়ে বানিয়ে লিখবেন না।
-
-১৮। উত্তর শেষে রেফারেন্স দেবেন।
-
-রেফারেন্স ফরম্যাট:
-
-রেফারেন্স:
-কিতাবের নাম — PDF পৃষ্ঠা
+১৫। PDF পৃষ্ঠা এবং মূল মুদ্রিত কিতাবের
+পৃষ্ঠা একই বিষয় নয়। তাই কেবল
+"PDF পৃষ্ঠা" হিসেবে উল্লেখ করবেন।
 
 """
 
 
     # =====================================================
-    # GEMINI GENERATE
+    # GEMINI
     # =====================================================
 
     client = get_gemini_client()
@@ -532,8 +586,7 @@ PDF পৃষ্ঠা: {page}
 
         contents=f"""
 
-নিচে লাইব্রেরি থেকে পাওয়া
-প্রাসঙ্গিক কিতাবের অংশ দেওয়া হলো:
+লাইব্রেরি থেকে পাওয়া কিতাবের অংশ:
 
 {context}
 
@@ -547,9 +600,7 @@ PDF পৃষ্ঠা: {page}
 """,
 
         config=types.GenerateContentConfig(
-
             system_instruction=system_instruction,
-
             temperature=0.1
         )
     )
@@ -558,7 +609,7 @@ PDF পৃষ্ঠা: {page}
 
 
 # =========================================================
-# CHAT HISTORY
+# CHAT MEMORY
 # =========================================================
 
 if "messages" not in st.session_state:
@@ -574,14 +625,21 @@ if len(st.session_state.messages) == 0:
 
     st.markdown(
         """
-        <div class="welcome">
+        <div class="welcome-box">
 
-            <h2>কী জানতে চান?</h2>
+            <div class="welcome-icon">
+                📖
+            </div>
 
-            <p>
-                আপনার প্রশ্ন লিখুন এবং
-                আলা হযরত AI-কে জিজ্ঞাসা করুন।
-            </p>
+            <div class="welcome-title">
+                কী জানতে চান?
+            </div>
+
+            <div class="welcome-text">
+                আপনার ইসলামিক প্রশ্ন লিখুন।
+                আলা হযরত AI সংরক্ষিত কিতাবসমূহ
+                থেকে তথ্য খুঁজে উত্তর দেওয়ার চেষ্টা করবে।
+            </div>
 
         </div>
         """,
@@ -590,7 +648,7 @@ if len(st.session_state.messages) == 0:
 
 
 # =========================================================
-# SHOW CHAT
+# CHAT HISTORY
 # =========================================================
 
 for message in st.session_state.messages:
@@ -605,7 +663,7 @@ for message in st.session_state.messages:
 
 
 # =========================================================
-# QUESTION INPUT
+# INPUT
 # =========================================================
 
 prompt = st.chat_input(
@@ -614,15 +672,12 @@ prompt = st.chat_input(
 
 
 # =========================================================
-# PROCESS QUESTION
+# PROCESS
 # =========================================================
 
 if prompt:
 
-    # -----------------------------------------------------
-    # User message
-    # -----------------------------------------------------
-
+    # User
     st.session_state.messages.append(
         {
             "role": "user",
@@ -635,10 +690,7 @@ if prompt:
         st.markdown(prompt)
 
 
-    # -----------------------------------------------------
-    # AI message
-    # -----------------------------------------------------
-
+    # Assistant
     with st.chat_message("assistant"):
 
         try:
@@ -656,17 +708,12 @@ if prompt:
         except Exception as e:
 
             answer = (
-                "দুঃখিত, এই মুহূর্তে উত্তর প্রদান "
-                "করা সম্ভব হচ্ছে না। অনুগ্রহ করে "
-                "কিছুক্ষণ পর আবার চেষ্টা করুন।"
+                "দুঃখিত, বর্তমানে একটি প্রযুক্তিগত "
+                "সমস্যা হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন।"
             )
 
         st.markdown(answer)
 
-
-    # -----------------------------------------------------
-    # Save AI response
-    # -----------------------------------------------------
 
     st.session_state.messages.append(
         {
